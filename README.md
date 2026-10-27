@@ -35,3 +35,18 @@ The training-average row matches the dataset paper's constant baseline (13.78 / 
 | MMSE-HR, V4V (BP4D+) | Academic use only | Not used |
 
 Datasets download into `data/` (ignored by git), e.g. `stellis_bp_research.data.fetch(['video/*_IriunWebcam_*'])`.
+
+## Results so far
+
+| Estimate, MCD-rPPG phone video, held-out subjects | Systolic MAE | Diastolic MAE |
+| --- | --- | --- |
+| Training average | 13.71 | 7.35 |
+| Age, sex, height and weight | 12.56 | 7.28 |
+| Camera CNN (pulse wave + BP, multi-task) | 12.88 | 7.19 |
+| Age, sex, size + camera CNN | 12.67 | 7.33 |
+| Cuff reading before squats + average change | 10.80 | 5.92 |
+| Cuff reading before squats + camera's estimated change | 10.83 | 5.92 |
+
+The camera adds nothing beyond the profile, and nothing to following a change from a cuff reading ([`results/cnn_all_folds.md`](results/cnn_all_folds.md)). On the paper's protocol it lands near the published model (13.49 / 7.42 against 12.82 / 8.39, [`results/cnn_paper_protocol.md`](results/cnn_paper_protocol.md)). The Schrumpf et al. camera fine-tune reproduces at 12.6 / 10.4 against the paper's 13.6 / 10.3, while guessing the average on the same patients gives 12.7 / 10.3 ([`results/schrumpf_repro.md`](results/schrumpf_repro.md)).
+
+`rhythm_export.py` writes 30 s waveform segments (MCD-rPPG camera and finger, MIMIC PERform AF) for validating the app's rhythm check (stellis-health-dev #237).

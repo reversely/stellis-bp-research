@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.linear_model import RidgeCV
 from torch import nn
 
 from .baselines import PROFILE, scores
@@ -130,17 +131,37 @@ def run(rows, signals, test, valid, args, device='cuda'):
         if mae < best:
             best, state = mae, {k: v.clone() for k, v in model.state_dict().items()}
     model.load_state_dict(state)
+    pred = {k: predict(k) for k in ('valid', 'test')}
     truth = parts['test'][BP].to_numpy()
     train_rows = rows[~rows.fold.isin([test])]
-    from sklearn.linear_model import RidgeCV
-    prof = lambda f: f[PROFILE[:1] + PROFILE[2:]].assign(female=(f.sex == 'F').astype(float))
-    ridge = RidgeCV(alphas=np.logspace(-2, 4, 13)).fit(prof(train_rows), train_rows[BP])
-    return {
-        'model': predict('test') - truth,
+    prof = lambda f: f[PROFILE[:1] + PROFILE[2:]].assign(female=(f.sex == 'F').astype(float)).to_numpy()
+    ridge = lambda: RidgeCV(alphas=np.logspace(-2, 4, 13))
+    profile = ridge().fit(prof(train_rows), train_rows[BP])
+    # Stacking and calibration are fitted on the validation fold, which the network did not train on
+    # (it chose the epoch, so these rows lean slightly optimistic).
+    stacked = ridge().fit(np.c_[prof(parts['valid']), pred['valid']], parts['valid'][BP])
+    out = {
+        'model': pred['test'] - truth,
         'constant': np.tile(train_rows[BP].mean().to_numpy(), (len(truth), 1)) - truth,
-        'age, sex, size': ridge.predict(prof(parts['test'])) - truth,
+        'age, sex, size': profile.predict(prof(parts['test'])) - truth,
+        'age, sex, size + model': stacked.predict(np.c_[prof(parts['test']), pred['test']]) - truth,
         'valid MAE': best,
     }
+    # Calibrated: the after-squats reading from the before reading plus the camera's estimated change.
+    pv, pt = paired(parts['valid'], pred['valid']), paired(parts['test'], pred['test'])
+    change = ridge().fit(pv['change'], pv['after'] - pv['before'])
+    out['calibrated: + average change'] = pt['before'] + (pv['after'] - pv['before']).mean(0) - pt['after']
+    out['calibrated: + model change'] = pt['before'] + change.predict(pt['change']) - pt['after']
+    return out
+
+
+def paired(part, pred):
+    """Subjects with both steps: cuff BP before and after, and the model's estimated change."""
+    frame = part[['patient_id', 'step']].assign(i=range(len(part)))
+    both = frame.pivot(index='patient_id', columns='step', values='i').dropna().astype(int)
+    b, a = both['before'].to_numpy(), both['after'].to_numpy()
+    bp = part[BP].to_numpy()
+    return {'before': bp[b], 'after': bp[a], 'change': pred[a] - pred[b]}
 
 
 def main():
@@ -163,7 +184,7 @@ def main():
     results = {}
     for test, valid in pairs:
         r = run(rows, signals, test, valid, args)
-        print(f'test {test} valid {valid}:', {k: np.abs(v).mean(0).round(2).tolist() if k != 'valid MAE' else round(v, 2)
+        print(f'test {test} valid {valid}:', {k: np.abs(v).mean(0).round(2).tolist() if k != 'valid MAE' else round(float(v), 2)
                                              for k, v in r.items()}, flush=True)
         for k, v in r.items():
             if k != 'valid MAE':

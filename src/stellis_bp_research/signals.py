@@ -39,8 +39,10 @@ def pos(rgb, rate=RATE):
 
 def stamps(path):
     f = pd.read_csv(path, sep=r'\s+', header=None, names=['v', 'date', 'time'])
-    t = pd.to_datetime(f.date + ' ' + f.time, format='ISO8601')
-    return t, f.v.to_numpy(float)
+    # A few finger files have garbled lines (two timestamps run together); those samples are dropped.
+    t = pd.to_datetime(f.date + ' ' + f.time, format='ISO8601', errors='coerce')
+    ok = t.notna().to_numpy()
+    return t[ok].reset_index(drop=True), f.v.to_numpy(float)[ok]
 
 
 def finger(name):
